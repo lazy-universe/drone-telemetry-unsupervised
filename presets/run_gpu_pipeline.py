@@ -20,6 +20,7 @@ from implement.utils.dataset_processing.dataset_helper import impute_and_scale_d
 from implement.utils.classical_ml.classical_models import get_unsupervised_point_models
 from implement.utils.classical_ml.classical_train_eval import get_anomaly_scores
 from implement.utils.deep_learning.dl_models import get_unsupervised_models
+from implement.utils.helper.task5_quick_wins import physics_rule_flags
 
 # Predefined Feature Sets
 FEATURE_SETS = {
@@ -30,6 +31,19 @@ FEATURE_SETS = {
     'baseline_10': ['height', 'ground_speed', 'vertical_speed', 'acceleration', 'turn_rate', 'path_curvature', 'heading_speed_consistency', 'motion_smoothness', 'prediction_error', 'yaw_acceleration'],
     'baseline_9_no_yaw': ['height', 'ground_speed', 'vertical_speed', 'acceleration', 'turn_rate', 'path_curvature', 'heading_speed_consistency', 'motion_smoothness', 'prediction_error'],
     'baseline_9_no_pe': ['height', 'ground_speed', 'vertical_speed', 'acceleration', 'turn_rate', 'path_curvature', 'heading_speed_consistency', 'motion_smoothness', 'yaw_acceleration'],
+    'noise_texture_13': [
+        'height', 'ground_speed', 'vertical_speed', 'acceleration', 'turn_rate',
+        'path_curvature', 'heading_speed_consistency', 'motion_smoothness',
+        'prediction_error', 'yaw_acceleration',
+        'prediction_error_autocorrelation', 'position_residual_std', 'speed_spectral_entropy'
+    ],
+    'task5_extended_16': [
+        'height', 'ground_speed', 'vertical_speed', 'acceleration', 'turn_rate',
+        'path_curvature', 'heading_speed_consistency', 'motion_smoothness',
+        'prediction_error', 'yaw_acceleration',
+        'prediction_error_autocorrelation', 'position_residual_std', 'speed_spectral_entropy',
+        'pe_window_mean', 'pe_window_var', 'pe_window_skew'
+    ],
 }
 
 def clear_ephemeral_cache():
@@ -69,14 +83,14 @@ def compute_dl_anomaly_scores(model, data_seq, device='cpu'):
             scores.extend(mse.cpu().numpy())
     return np.array(scores)
 
-def run_experiment(exp_name, feature_list, model_family="all", epochs=15, batch_size=64, lr=0.001, window_len=20, k_thresh=3.0, patience=7, fresh_cache=True, use_cache=True):
+def run_experiment(exp_name, feature_list, model_family="all", epochs=15, batch_size=64, lr=0.001, window_len=20, k_thresh=3.0, patience=7, fresh_cache=True, use_cache=True, enable_physics_rules=False):
     if fresh_cache:
         clear_ephemeral_cache()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"\n=========================================================================")
     print(f"=== GPU EXPERIMENT: {exp_name.upper()} ({len(feature_list)} Features) ===")
-    print(f"=== Device: {device} | Max Epochs: {epochs} | Patience: {patience} | Window: {window_len} | Use Cache: {use_cache} ===")
+    print(f"=== Device: {device} | Max Epochs: {epochs} | Patience: {patience} | Window: {window_len} | Use Cache: {use_cache} | Physics Rules: {enable_physics_rules} ===")
     print(f"=========================================================================")
 
     dji_df, esp32_df = get_labeled_datasets(features=feature_list)
@@ -104,6 +118,17 @@ def run_experiment(exp_name, feature_list, model_family="all", epochs=15, batch_
 
     results = []
 
+    # Standalone Physics Rules (if enabled)
+    if enable_physics_rules:
+        row_pr = {'Experiment': exp_name, 'Model': 'Physics Rules Standalone', 'Type': 'Deterministic Rules'}
+        rule_flags_all = physics_rule_flags(test_df)
+        for cls in all_classes:
+            mask = (test_df['attack_class'] == cls)
+            anom = rule_flags_all[mask]
+            acc = np.mean(~anom)*100.0 if cls == 'Normal DJI' else np.mean(anom)*100.0
+            row_pr[cls] = round(acc, 2)
+        results.append(row_pr)
+
     # 1. Pointwise Classical Models
     if model_family in ['all', 'pointwise']:
         print("\n>>> Training / Evaluating Pointwise Classical Models...")
@@ -116,7 +141,8 @@ def run_experiment(exp_name, feature_list, model_family="all", epochs=15, batch_
             val_scores = get_anomaly_scores(model, X_val_scaled)
             thresh = np.mean(val_scores) + k_thresh * np.std(val_scores)
 
-            row = {'Experiment': exp_name, 'Model': name, 'Type': 'Classical Pointwise'}
+            model_type_label = 'Classical Pointwise + Rules' if enable_physics_rules else 'Classical Pointwise'
+            row = {'Experiment': exp_name, 'Model': name, 'Type': model_type_label}
 
             for cls in all_classes:
                 mask = (test_df['attack_class'] == cls)
@@ -124,6 +150,8 @@ def run_experiment(exp_name, feature_list, model_family="all", epochs=15, batch_
                 if len(test_cls_scaled) > 0:
                     cls_scores = get_anomaly_scores(model, test_cls_scaled)
                     anom = cls_scores > thresh
+                    if enable_physics_rules:
+                        anom = anom | physics_rule_flags(test_df[mask])
                     acc = np.mean(~anom)*100.0 if cls == 'Normal DJI' else np.mean(anom)*100.0
                 else:
                     acc = 0.0
@@ -235,7 +263,8 @@ def run_experiment(exp_name, feature_list, model_family="all", epochs=15, batch_
                     }, ckpt_path)
                     print(f"    💾 Saved DL Checkpoint: {ckpt_path}")
 
-                row = {'Experiment': exp_name, 'Model': name, 'Type': 'Deep Learning (GPU)'}
+                model_type_label = 'Deep Learning (GPU) + Rules' if enable_physics_rules else 'Deep Learning (GPU)'
+                row = {'Experiment': exp_name, 'Model': name, 'Type': model_type_label}
                 for cls in all_classes:
                     mask = (test_df['attack_class'] == cls)
                     test_cls_scaled = X_test_scaled[mask]
@@ -243,6 +272,10 @@ def run_experiment(exp_name, feature_list, model_family="all", epochs=15, batch_
                     if len(test_cls_seq) > 0:
                         cls_scores = compute_dl_anomaly_scores(net, test_cls_seq, device=device)
                         anom = cls_scores > thresh
+                        if enable_physics_rules:
+                            physics_flags_cls = physics_rule_flags(test_df[mask])
+                            if len(physics_flags_cls) >= window_len:
+                                anom = anom | physics_flags_cls[window_len - 1:]
                         acc = np.mean(~anom)*100.0 if cls == 'Normal DJI' else np.mean(anom)*100.0
                     else:
                         acc = 0.0
@@ -272,6 +305,7 @@ def main():
     parser.add_argument("--window-len", type=int, default=20)
     parser.add_argument("--no-fresh-cache", action="store_true", help="Do not clear ephemeral dataset cache before running")
     parser.add_argument("--no-model-cache", action="store_true", help="Do not load cached models; force retrain all models")
+    parser.add_argument("--enable-physics-rules", action="store_true", default=False, help="Task 5: Enable hard physics-based rule flags via logical OR (off by default)")
 
     args = parser.parse_args()
 
@@ -294,8 +328,10 @@ def main():
         patience=args.patience,
         window_len=args.window_len,
         fresh_cache=not args.no_fresh_cache,
-        use_cache=not args.no_model_cache
+        use_cache=not args.no_model_cache,
+        enable_physics_rules=args.enable_physics_rules
     )
 
 if __name__ == "__main__":
     main()
+

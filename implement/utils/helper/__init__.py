@@ -35,3 +35,11 @@ from .logging_helper import (
     log_pointwise_dataset_statistics,
     log_sequence_dataset_statistics
 )
+from .task5_quick_wins import (
+    physics_rule_flags,
+    compute_pe_distribution_features,
+    combine_model_with_physics,
+    evaluate_predictions_with_physics,
+    PE_DISTRIBUTION_FEATURES,
+    TASK5_EXTENDED_FEATURES
+)
