@@ -81,10 +81,20 @@ class PCAWrapper:
     def fit(self, X, y=None):
         X = np.asarray(X, dtype=float)
         n_feats = X.shape[1]
-        n_comp = self.n_components
-        if isinstance(n_comp, int) and n_comp >= n_feats:
+
+        # Determine exact integer component count to avoid float shape casting in Python 3.13 / CuPy
+        if isinstance(self.n_components, (float, np.floating)):
+            full_pca = PCA(n_components=int(n_feats), random_state=self.random_state)
+            full_pca.fit(X)
+            cum_var = np.cumsum(full_pca.explained_variance_ratio_)
+            n_comp = int(np.searchsorted(cum_var, float(self.n_components)) + 1)
+            n_comp = max(1, min(n_feats - 1, n_comp))
+        elif isinstance(self.n_components, (int, np.integer)):
+            n_comp = max(1, min(n_feats - 1, int(self.n_components)))
+        else:
             n_comp = max(1, n_feats - 1)
-        self.pca = PCA(n_components=n_comp, random_state=self.random_state)
+
+        self.pca = PCA(n_components=int(n_comp), random_state=self.random_state)
         self.pca.fit(X)
         self.mean_ = self.pca.mean_
         self.components_ = self.pca.components_
@@ -104,8 +114,8 @@ class PCAWrapper:
         t2_stat = np.sum((scores ** 2) / self.explained_variance_, axis=1)
 
         # Combined normalized anomaly metric
-        n_pcs = max(1, self.components_.shape[0])
-        n_residual = max(1, X.shape[1] - n_pcs)
+        n_pcs = max(1, int(self.components_.shape[0]))
+        n_residual = max(1, int(X.shape[1] - n_pcs))
         return (q_stat / n_residual) + (t2_stat / n_pcs)
 
     def predict(self, X, threshold=None):
@@ -122,14 +132,14 @@ class KMeansWrapper:
     """
 
     def __init__(self, n_clusters=5, random_state=42):
-        self.n_clusters = n_clusters
+        self.n_clusters = int(n_clusters)
         self.random_state = random_state
         self.kmeans = None
 
     def fit(self, X, y=None):
         X = np.asarray(X, dtype=float)
-        k = min(self.n_clusters, len(X))
-        self.kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init='auto')
+        k = max(1, min(int(self.n_clusters), int(len(X))))
+        self.kmeans = KMeans(n_clusters=int(k), random_state=self.random_state, n_init='auto')
         self.kmeans.fit(X)
         return self
 
@@ -153,14 +163,14 @@ class DBSCANWrapper:
     """
 
     def __init__(self, eps=0.5, min_samples=5):
-        self.eps = eps
-        self.min_samples = min_samples
+        self.eps = float(eps)
+        self.min_samples = int(min_samples)
         self.dbscan = None
         self.core_points_nn_ = None
 
     def fit(self, X, y=None):
         X = np.asarray(X, dtype=float)
-        self.dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)
+        self.dbscan = DBSCAN(eps=float(self.eps), min_samples=int(self.min_samples))
         self.dbscan.fit(X)
 
         core_indices = self.dbscan.core_sample_indices_
