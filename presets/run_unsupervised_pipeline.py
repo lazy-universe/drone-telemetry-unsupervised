@@ -178,14 +178,15 @@ def run_experiment(
     # Standalone Physics Rules (if enabled)
     if enable_physics_rules:
         rule_flags_all = compute_physics_rule_flags(test_df)
-        normal_mask = (test_df["attack_class"] == "Normal DJI")
-        spoofed_mask = ~normal_mask
+        eval_mask = (test_df["attack_class"] != "Sim Geometry")
+        normal_mask = (test_df["attack_class"] == "Normal DJI") & eval_mask
+        spoofed_mask = (test_df["attack_class"] != "Normal DJI") & eval_mask
 
         norm_acc = np.mean(~rule_flags_all[normal_mask]) * 100.0 if np.sum(normal_mask) > 0 else 0.0
         spoo_acc = np.mean(rule_flags_all[spoofed_mask]) * 100.0 if np.sum(spoofed_mask) > 0 else 0.0
         overall_acc = (
-            (np.sum(~rule_flags_all[normal_mask]) + np.sum(rule_flags_all[spoofed_mask])) / len(test_df) * 100.0
-        )
+            (np.sum(~rule_flags_all[normal_mask]) + np.sum(rule_flags_all[spoofed_mask])) / np.sum(eval_mask) * 100.0
+        ) if np.sum(eval_mask) > 0 else 0.0
 
         aggregate_results.append({
             "Experiment": exp_name,
@@ -225,14 +226,15 @@ def run_experiment(
             if enable_physics_rules:
                 anom_pred = anom_pred | compute_physics_rule_flags(test_df)
 
-            normal_mask = (test_df["attack_class"] == "Normal DJI")
-            spoofed_mask = ~normal_mask
+            eval_mask = (test_df["attack_class"] != "Sim Geometry")
+            normal_mask = (test_df["attack_class"] == "Normal DJI") & eval_mask
+            spoofed_mask = (test_df["attack_class"] != "Normal DJI") & eval_mask
 
             norm_acc = np.mean(~anom_pred[normal_mask]) * 100.0 if np.sum(normal_mask) > 0 else 0.0
             spoo_acc = np.mean(anom_pred[spoofed_mask]) * 100.0 if np.sum(spoofed_mask) > 0 else 0.0
             overall_acc = (
-                (np.sum(~anom_pred[normal_mask]) + np.sum(anom_pred[spoofed_mask])) / len(test_df) * 100.0
-            )
+                (np.sum(~anom_pred[normal_mask]) + np.sum(anom_pred[spoofed_mask])) / np.sum(eval_mask) * 100.0
+            ) if np.sum(eval_mask) > 0 else 0.0
 
             aggregate_results.append({
                 "Experiment": exp_name,
@@ -369,14 +371,15 @@ def run_experiment(
                             dl_anom_all = dl_anom_all | ph_flags[window_len - 1:]
 
                     test_classes_windowed = test_df["attack_class"].values[window_len - 1:]
-                    normal_mask_dl = (test_classes_windowed == "Normal DJI")
-                    spoofed_mask_dl = ~normal_mask_dl
+                    eval_mask_dl = (test_classes_windowed != "Sim Geometry")
+                    normal_mask_dl = (test_classes_windowed == "Normal DJI") & eval_mask_dl
+                    spoofed_mask_dl = (test_classes_windowed != "Normal DJI") & eval_mask_dl
 
                     norm_acc = np.mean(~dl_anom_all[normal_mask_dl]) * 100.0 if np.sum(normal_mask_dl) > 0 else 0.0
                     spoo_acc = np.mean(dl_anom_all[spoofed_mask_dl]) * 100.0 if np.sum(spoofed_mask_dl) > 0 else 0.0
                     overall_acc = (
-                        (np.sum(~dl_anom_all[normal_mask_dl]) + np.sum(dl_anom_all[spoofed_mask_dl])) / len(dl_anom_all) * 100.0
-                    )
+                        (np.sum(~dl_anom_all[normal_mask_dl]) + np.sum(dl_anom_all[spoofed_mask_dl])) / np.sum(eval_mask_dl) * 100.0
+                    ) if np.sum(eval_mask_dl) > 0 else 0.0
                 else:
                     norm_acc, spoo_acc, overall_acc = 0.0, 0.0, 0.0
 
