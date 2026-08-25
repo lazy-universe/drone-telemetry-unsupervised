@@ -1,9 +1,9 @@
 """
 Script: Compute Feature Value Ranges (Min, Max, Mean, Std, P1, P99)
-Calculates exact empirical bounds for all 10 features across:
+Calculates exact empirical bounds for features across:
   1. Normal DJI Flights
   2. Real ESP32 Spoofing Attacks
-  3. Simulated Attacks & Sim Normal
+  3. Simulated Attacks (Sim Baseline, Sim Easy, Sim Medium, Sim Hard)
 """
 import sys, warnings
 from pathlib import Path

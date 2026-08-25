@@ -1,3 +1,8 @@
+"""
+Preset Script: Physics-Informed Rule Ensemble Evaluation
+Evaluates baseline unsupervised ML models standalone vs augmented with deterministic physics rules.
+"""
+
 import sys
 import argparse
 import pandas as pd
@@ -13,14 +18,14 @@ from implement.workflows.per_class_evaluation import get_labeled_datasets
 from implement.utils.dataset_processing.dataset_helper import impute_and_scale_data
 from implement.utils.classical_ml.classical_models import get_unsupervised_point_models
 from implement.utils.classical_ml.classical_train_eval import get_anomaly_scores
-from implement.utils.helper.task5_quick_wins import (
+from implement.utils.helper.physics_rules import (
     compute_physics_rule_flags,
     combine_anomaly_mask_with_physics_rules,
     evaluate_physics_augmented_models,
-    TASK5_EXTENDED_FEATURES
+    PHYSICS_EXTENDED_FEATURES
 )
 from implement.utils.helper import get_output_dir
-from presets.run_gpu_pipeline import FEATURE_SETS
+from presets.run_unsupervised_pipeline import FEATURE_SETS
 
 
 def run_physics_ensemble_evaluation(
@@ -28,11 +33,10 @@ def run_physics_ensemble_evaluation(
     threshold_sigma: float = 3.0
 ) -> pd.DataFrame:
     """
-    Runs the Task 5 Quick Wins benchmark: evaluates unsupervised models standalone vs combined with
-    deterministic physics-based anomaly rules.
+    Evaluates unsupervised models standalone vs combined with deterministic physics-based anomaly rules.
     """
     print("=========================================================================")
-    print(f"=== TASK 5 QUICK WINS: PHYSICS RULE ENSEMBLE ({feature_preset}) ===")
+    print(f"=== PHYSICS RULE ENSEMBLE BENCHMARK ({feature_preset}) ===")
     print("=========================================================================")
 
     selected_features = FEATURE_SETS.get(feature_preset, FEATURE_SETS['noise_texture_13'])
@@ -48,7 +52,6 @@ def run_physics_ensemble_evaluation(
     dji_test_set  = genuine_dji_df[genuine_dji_df['flight_id'].isin(test_flights)]
 
     composite_test_set = pd.concat([dji_test_set, hardware_esp32_df], ignore_index=True)
-    all_attack_classes = sorted(list(composite_test_set['attack_class'].unique()))
 
     # Fit Imputer and Scaler on normal training flights only
     raw_train_matrix = dji_train_set[selected_features]
@@ -73,23 +76,23 @@ def run_physics_ensemble_evaluation(
     print(">>> Evaluating Standalone Models vs Physics Rules Augmented Ensembles...")
     comparison_dataframe = evaluate_physics_augmented_models(composite_test_set, model_predictions_dict)
 
-    output_directory = get_output_dir() / 'task5_quick_wins'
+    output_directory = get_output_dir() / 'physics_ensemble'
     output_directory.mkdir(parents=True, exist_ok=True)
-    csv_output_path = output_directory / f"task5_evaluation_{feature_preset}.csv"
+    csv_output_path = output_directory / f"physics_ensemble_evaluation_{feature_preset}.csv"
     comparison_dataframe.to_csv(csv_output_path, index=False)
 
-    print("\nTASK 5 EVALUATION RESULTS:")
+    print("\nPHYSICS RULE ENSEMBLE RESULTS:")
     print(comparison_dataframe.to_string(index=False))
-    print(f"\n✅ Successfully saved Task 5 results to: {csv_output_path}")
+    print(f"\n✅ Saved Physics Ensemble results to: {csv_output_path}")
 
     return comparison_dataframe
 
 
 def main():
-    cli_parser = argparse.ArgumentParser(description="Task 5 Quick Wins: Physics Rule Ensemble Evaluation")
+    cli_parser = argparse.ArgumentParser(description="Physics Rule Ensemble Evaluation")
     cli_parser.add_argument(
         "--preset", 
-        choices=["noise_texture_13", "task5_extended_16", "baseline_10"], 
+        choices=["noise_texture_13", "physics_extended_16", "baseline_10"], 
         default="noise_texture_13", 
         help="Feature preset to evaluate"
     )

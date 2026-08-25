@@ -30,40 +30,9 @@ def get_transient_dir() -> Path:
     return TRANSIENT_DIR
 
 def get_pipeline_mode() -> str:
-    """Determines which pipeline is active: supervised, unsupervised, or exploration."""
+    """Returns pipeline mode: defaults to 'unsupervised'."""
     import os
-    if 'PIPELINE_MODE' in os.environ:
-        return os.environ['PIPELINE_MODE']
-        
-    import sys
-    argv0 = sys.argv[0] if sys.argv else ""
-    argv0_lower = argv0.lower()
-    
-    # Check if we are running in supervised presets
-    if any(k in argv0_lower for k in ["run_random_split", "run_flight_split", "run_sequence_classification", "run_vae_classification", "run_multi_defense"]):
-        return "supervised"
-        
-    # Check if we are running in unsupervised presets
-    if any(k in argv0_lower for k in ["run_isolation_forest", "run_autoencoders"]):
-        return "unsupervised"
-        
-    # Check if we are in exploration.ipynb or debug_accuracy.py
-    if any(k in argv0_lower for k in ["exploration", "debug_accuracy"]):
-        return "exploration"
-        
-    # Inspect stack frames for notebook filenames or scripts
-    import inspect
-    for frame_info in inspect.stack():
-        filename = frame_info.filename.lower()
-        if "supervised" in filename:
-            return "supervised"
-        if "unsupervised" in filename:
-            return "unsupervised"
-        if "exploration" in filename:
-            return "exploration"
-            
-    # Default fallback
-    return "unsupervised"
+    return os.environ.get('PIPELINE_MODE', 'unsupervised')
 
 def get_ephermal_dir() -> Path:
     """Returns the intermediate/temp dataset directory (formerly intermediate_dataset)."""

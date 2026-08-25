@@ -56,7 +56,7 @@ def get_workspace_paths(custom_dataset_dir=None, custom_output_dir=None):
         'ephermal_dataset': ephermal_dir
     }
 
-def get_run_subfolder_name(pca: bool = False, tune: bool = False, balanced: bool = False, validate: bool = False, cv: int = 5, smote: bool = False):
+def get_run_subfolder_name(pca: bool = False, validate: bool = False, cv: int = 5):
     """
     Generates an argument-dependent subfolder name for organizing dataset and evaluation outputs.
     Returns None if no active flags are present.
@@ -64,14 +64,8 @@ def get_run_subfolder_name(pca: bool = False, tune: bool = False, balanced: bool
     parts = []
     if pca:
         parts.append("pca")
-    if tune:
-        parts.append("tune")
-    if balanced:
-        parts.append("balanced")
     if validate:
         parts.append(f"validate_{cv}")
-    if smote:
-        parts.append("smote")
     return "_".join(parts) if parts else None
 
 if __name__ == '__main__':

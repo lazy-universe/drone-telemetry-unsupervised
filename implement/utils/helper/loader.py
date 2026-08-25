@@ -71,8 +71,7 @@ def engineer_consistent_telemetry_features(df_consistent: pd.DataFrame) -> pd.Da
 
 def get_or_preprocess_dji_dataset(filter_length_100: bool = False, features=None) -> pd.DataFrame:
     """
-    Ensures the DJI dataset is loaded from the direct standard schema cache,
-    and appends simulated normal flights to the Real class.
+    Loads DJI dataset from cache or precomputes and caches the master dataset.
     """
     from implement.utils.helper import get_consistent_dataset_dir, get_dji_engineered_dir, get_dji_master_file
 
@@ -83,46 +82,51 @@ def get_or_preprocess_dji_dataset(filter_length_100: bool = False, features=None
     if features is None:
         features = INTERSECTING_FEATURES
 
+    # Fast Path: Load from master preprocessed CSV
+    if dji_master_csv.exists():
+        print(f"Loading DJI dataset from cached master: {dji_master_csv}")
+        dji_df = pd.read_csv(dji_master_csv)
+        if 'height' not in dji_df.columns and 'altitude' in dji_df.columns:
+            dji_df['height'] = dji_df['altitude']
+        if filter_length_100 and 'flight_id' in dji_df.columns:
+            flight_counts = dji_df['flight_id'].value_counts()
+            valid_flights = flight_counts[flight_counts >= 100].index
+            dji_df = dji_df[dji_df['flight_id'].isin(valid_flights)]
+        dji_df['nature'] = 0
+        return dji_df
+
     if not consistent_dir.exists() or not any(consistent_dir.glob('*.csv')):
-        print()
-        print('consistent_dataset not found or empty. Running raw -> trimmed -> standard pipeline...')
+        print('\nconsistent_dataset not found or empty. Running raw -> trimmed -> standard pipeline...')
         from implement.utils.dataset_processing.dji_prep import preprocess_dji_points
         from implement.utils.helper import get_dji_raw_dir
         preprocess_dji_points(get_dji_raw_dir(), output_master_file=dji_master_csv)
 
     all_points = []
-    if dji_master_csv.exists() and engineered_dir.exists() and any(engineered_dir.iterdir()):
-        print()
-        print('Processed DJI master CSV and engineered dataset already exist. Loading from cache...')
-        for file_path in sorted(engineered_dir.glob('*.csv')):
-            df_eng = pd.read_csv(file_path)
-            if 'height' not in df_eng.columns and 'altitude' in df_eng.columns:
-                df_eng['height'] = df_eng['altitude']
-            if filter_length_100 and len(df_eng) < 100:
-                continue
-            df_eng['flight_id'] = file_path.name
-            all_points.append(df_eng)
-    else:
-        print()
-        print('Preprocessing DJI flights from standard schema files...')
-        engineered_dir.mkdir(parents=True, exist_ok=True)
-        consistent_files = sorted(list(consistent_dir.glob('*.csv')))
+    print('\nPreprocessing DJI flights from standard schema files...')
+    engineered_dir.mkdir(parents=True, exist_ok=True)
+    consistent_files = sorted(list(consistent_dir.glob('*.csv')))
 
-        for file_path in consistent_files:
-            df = pd.read_csv(file_path, low_memory=False)
-            if filter_length_100 and len(df) < 100:
-                continue
+    for file_path in consistent_files:
+        df = pd.read_csv(file_path, low_memory=False)
+        if filter_length_100 and len(df) < 100:
+            continue
 
-            df_final = engineer_consistent_telemetry_features(df)
-            df_final.to_csv(engineered_dir / file_path.name, index=False)
-            df_final['flight_id'] = file_path.name
-            all_points.append(df_final)
+        df_final = engineer_consistent_telemetry_features(df)
+        df_final['flight_id'] = file_path.name
+        df_final.to_csv(engineered_dir / file_path.name, index=False)
+        all_points.append(df_final)
 
     if not all_points:
         return pd.DataFrame(columns=features + ['nature', 'flight_id'])
 
     dji_df = pd.concat(all_points, ignore_index=True)
     dji_df['nature'] = 0
+
+    # Save to master cache for instant loading on subsequent calls
+    dji_master_csv.parent.mkdir(parents=True, exist_ok=True)
+    dji_df.to_csv(dji_master_csv, index=False)
+    print(f"✓ Cached DJI master dataset to: {dji_master_csv} ({len(dji_df)} rows)")
+
     return dji_df
 
 
@@ -167,18 +171,15 @@ def get_genuine_dji_flights_with_device_split(filter_length_100: bool = False) -
 
 def get_or_preprocess_esp32_dataset() -> pd.DataFrame:
     """
-    Ensures raw ESP32 data is preprocessed into the direct standard schema,
-    then engineers the supervised/unsupervised features.
+    Ensures raw ESP32 data and simulated spoofed data are preprocessed and cached.
     """
     esp32_raw_file = get_esp32_raw_file()
     esp32_final_csv = get_esp32_final_file()
 
     if esp32_final_csv.exists():
-        print()
-        print(f'Processed ESP32 master CSV already exists at {esp32_final_csv}. Loading...')
+        print(f'Loading ESP32 dataset from cached master: {esp32_final_csv}')
         esp32_df = pd.read_csv(esp32_final_csv)
     else:
-        print()
         print('Preprocessing raw ESP32 bluetooth Remote ID logs...')
         esp32_df = preprocess_esp32_points(esp32_raw_file, output_file=esp32_final_csv)
 
@@ -193,32 +194,38 @@ def get_or_preprocess_esp32_dataset() -> pd.DataFrame:
     from implement.utils.helper import get_spoofed_flights_dir
     sim_dir = get_spoofed_flights_dir()
     sim_engineered_dir = get_simulated_engineered_dir()
-    sim_files = sorted(list(sim_dir.glob('*.csv')))
-    sim_dfs = []
+    sim_master_csv = sim_engineered_dir / 'all_spoofed_records.csv'
 
-    if sim_files:
-        print()
-        print(f'✓ Loading spoofed flights from {sim_dir}...')
-        sim_engineered_dir.mkdir(parents=True, exist_ok=True)
-        for file_path in sim_files:
-            if 'normal_flight' in file_path.name or 'hard_flight' in file_path.name:
-                continue
-            df = pd.read_csv(file_path)
-            if 'timestamp' not in df.columns:
-                continue
-            df_final = engineer_consistent_telemetry_features(df)
-            df_final['nature'] = 1
-            df_final['flight_id'] = f'sim_{file_path.stem}'
-            df_final.to_csv(sim_engineered_dir / file_path.name, index=False)
-            sim_dfs.append(df_final)
-
-        sim_df = pd.concat(sim_dfs, ignore_index=True) if sim_dfs else pd.DataFrame(columns=engineered.columns)
-        if sim_dfs:
-            print(f'✓ Saved spoofed engineered flights to: {sim_engineered_dir}')
+    # Fast Path for spoofed flights
+    if sim_master_csv.exists():
+        print(f'Loading simulated spoofed flights from cached master: {sim_master_csv}')
+        sim_df = pd.read_csv(sim_master_csv)
     else:
-        print()
-        print(f'[Warning] No spoofed flights found in {sim_dir}.')
-        sim_df = pd.DataFrame(columns=engineered.columns)
+        sim_files = sorted(list(sim_dir.glob('*.csv')))
+        sim_dfs = []
+
+        if sim_files:
+            print(f'Loading spoofed flights from {sim_dir}...')
+            sim_engineered_dir.mkdir(parents=True, exist_ok=True)
+            for file_path in sim_files:
+                if 'normal_flight' in file_path.name:
+                    continue
+                df = pd.read_csv(file_path)
+                if 'timestamp' not in df.columns:
+                    continue
+                df_final = engineer_consistent_telemetry_features(df)
+                df_final['nature'] = 1
+                df_final['flight_id'] = f'sim_{file_path.stem}'
+                df_final.to_csv(sim_engineered_dir / file_path.name, index=False)
+                sim_dfs.append(df_final)
+
+            sim_df = pd.concat(sim_dfs, ignore_index=True) if sim_dfs else pd.DataFrame(columns=engineered.columns)
+            if sim_dfs:
+                sim_df.to_csv(sim_master_csv, index=False)
+                print(f'✓ Cached spoofed master dataset to: {sim_master_csv}')
+        else:
+            print(f'[Warning] No spoofed flights found in {sim_dir}.')
+            sim_df = pd.DataFrame(columns=engineered.columns)
 
     combined_spoofed_df = pd.concat([engineered, sim_df], ignore_index=True)
     print(f'Combined Spoofed Class Size: {len(combined_spoofed_df)} rows (ESP32: {len(engineered)}, Simulated: {len(sim_df)})')

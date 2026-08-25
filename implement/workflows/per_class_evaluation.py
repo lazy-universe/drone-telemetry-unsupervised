@@ -47,6 +47,8 @@ def get_labeled_datasets(features: list = None):
             attack_classes.append('Sim Easy')
         elif 'medium' in fid_lower:
             attack_classes.append('Sim Medium')
+        elif 'hard' in fid_lower:
+            attack_classes.append('Sim Hard')
         elif 'geometry' in fid_lower:
             attack_classes.append('Sim Geometry')
         else:

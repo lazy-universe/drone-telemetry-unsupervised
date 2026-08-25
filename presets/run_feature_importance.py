@@ -35,7 +35,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ATTACK_MAP = {
     'esp32': 'Real ESP32', 'baseline': 'Sim Baseline', 'easy': 'Sim Easy',
-    'medium': 'Sim Medium', 'hard': 'Sim Hard', 'geometry': 'Sim Geometry',
+    'medium': 'Sim Medium', 'hard': 'Sim Hard',
 }
 
 # All 13 Features Set
@@ -95,7 +95,7 @@ def main():
         mask   = test_df['attack_class'] == cls
         scores = get_anomaly_scores(model, X_test[mask])
         is_anomaly = scores > threshold
-        if cls in ['Normal DJI', 'Sim Normal']:
+        if cls == 'Normal DJI':
             acc = np.mean(~is_anomaly) * 100.0
         else:
             acc = np.mean(is_anomaly) * 100.0
@@ -116,7 +116,7 @@ def main():
             mask   = test_df['attack_class'] == cls
             scores = get_anomaly_scores(model, X_test_shuffled[mask])
             is_anomaly = scores > threshold
-            if cls in ['Normal DJI', 'Sim Normal']:
+            if cls == 'Normal DJI':
                 acc = np.mean(~is_anomaly) * 100.0
             else:
                 acc = np.mean(is_anomaly) * 100.0

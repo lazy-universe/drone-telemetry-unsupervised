@@ -52,14 +52,23 @@ def main():
         help="Model family to evaluate (default: all)"
     )
     parser.add_argument(
-        "--epochs",
-        type=int,
-        default=5,
-        help="Number of epochs for deep learning autoencoders (default: 5)"
+        "--features",
+        nargs='+',
+        default=None,
+        help="Explicit list of features to evaluate (space-separated or comma-separated)"
     )
     args = parser.parse_args()
 
-    sets_to_run = FEATURE_SETS.items() if args.feature_set == "all" else [(args.feature_set, FEATURE_SETS[args.feature_set])]
+    if args.features:
+        custom_feats = []
+        for item in args.features:
+            for feat in item.split(','):
+                feat_clean = feat.strip()
+                if feat_clean and feat_clean not in custom_feats:
+                    custom_feats.append(feat_clean)
+        sets_to_run = [(f"custom_{len(custom_feats)}_features", custom_feats)]
+    else:
+        sets_to_run = FEATURE_SETS.items() if args.feature_set == "all" else [(args.feature_set, FEATURE_SETS[args.feature_set])]
 
     print("=" * 80)
     print("=== RUNNING UNSUPERVISED EVALUATION: DEVICE-LEVEL SPLIT (random_state=42) ===")

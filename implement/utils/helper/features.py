@@ -19,6 +19,35 @@ INTERSECTING_FEATURES = [
 
 UNSUPERVISED_FEATURES = INTERSECTING_FEATURES.copy()
 
+KINEMATIC_8_FEATURES = [
+    'height',
+    'ground_speed',
+    'vertical_speed',
+    'acceleration',
+    'turn_rate',
+    'path_curvature',
+    'heading_speed_consistency',
+    'motion_smoothness',
+]
+
+NOISE_TEXTURE_13_FEATURES = INTERSECTING_FEATURES + [
+    'prediction_error_autocorrelation',
+    'position_residual_std',
+    'speed_spectral_entropy',
+]
+
+BASELINE_CORRELATION_13_FEATURES = INTERSECTING_FEATURES + [
+    'corr_speed_turn',
+    'corr_accel_turn',
+    'corr_vert_speed',
+]
+
+CROSS_CORRELATION_16_FEATURES = NOISE_TEXTURE_13_FEATURES + [
+    'corr_speed_turn',
+    'corr_accel_turn',
+    'corr_vert_speed',
+]
+
 
 def compute_geographic_bearing(lat1, lon1, lat2, lon2):
     """
@@ -181,10 +210,10 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
     window_len = int(round(3.0 / step_size))
     
     # 8. Speed Variance
-    speed_variance = df_temp['ground_speed'].rolling(window=window_len, min_periods=1).var(ddof=0).values
+    speed_variance = df_temp['ground_speed'].rolling(window=window_len, min_periods=2).var(ddof=0).fillna(0.0).values
     
     # 9. Vertical Speed Variance
-    vertical_speed_variance = df_temp['vertical_speed'].rolling(window=window_len, min_periods=1).var(ddof=0).values
+    vertical_speed_variance = df_temp['vertical_speed'].rolling(window=window_len, min_periods=2).var(ddof=0).fillna(0.0).values
     
     # 10. Heading Variance
     theta_rad = np.radians((90.0 - heading) % 360)
@@ -238,11 +267,20 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
     # Prediction Error Autocorrelation [−1, 1]
     # Real GPS multipath noise is temporally correlated (lag-1 autocorr > 0).
     # Simulated flights have IID or zero noise (autocorr ≈ 0).
+    def _safe_autocorr(x):
+        if len(x) < 3:
+            return 0.0
+        s = pd.Series(x)
+        if s.std(ddof=0) < 1e-8:
+            return 0.0
+        val = s.autocorr(lag=1)
+        return 0.0 if (np.isnan(val) or np.isinf(val)) else float(val)
+
     pe_series = pd.Series(prediction_error)
     prediction_error_autocorrelation = pe_series.rolling(
-        window=window_len, min_periods=2
+        window=window_len, min_periods=3
     ).apply(
-        lambda x: pd.Series(x).autocorr(lag=1) if len(x) > 1 else 0.0, raw=False
+        _safe_autocorr, raw=False
     ).fillna(0.0).values
     prediction_error_autocorrelation = np.clip(prediction_error_autocorrelation, -1.0, 1.0)
 
@@ -267,7 +305,7 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
     lon_res_m = (longitude_abs - lon_smooth) * 111139.0 * cos_ref_lat
     position_residual = np.sqrt(lat_res_m**2 + lon_res_m**2)
     position_residual_std = np.clip(
-        pd.Series(position_residual).rolling(window=window_len, min_periods=1).std(ddof=0).fillna(0.0).values,
+        pd.Series(position_residual).rolling(window=window_len, min_periods=2).std(ddof=0).fillna(0.0).values,
         0.0, 50.0
     )
 
@@ -297,24 +335,48 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
     # Specific Kinetic Energy [0, 5000] m^2/s^2
     specific_kinetic_energy = np.clip(0.5 * (ground_speed**2 + vertical_speed**2), 0.0, 5000.0)
 
-    # 1. Target Class: Sim Medium (Yaw Acceleration)
+    # Yaw Acceleration
     turn_rate_diff = np.diff(turn_rate, prepend=turn_rate[0])
     yaw_acceleration = np.clip(turn_rate_diff / time_diff, -1000.0, 1000.0)
 
-    # 2. Target Class: Sim Hard (Kinematic Velocity Mismatch)
+    # Kinematic Velocity Mismatch
     spatial_speed = np.clip(np.sqrt(dx_obs**2 + dy_obs**2) / time_diff, 0.0, 100.0)
     kinematic_velocity_mismatch = np.clip(np.abs(spatial_speed - ground_speed_abs), 0.0, 100.0)
 
-    # 3. Target Class: Sim Geometry (Curvature Energy Product)
+    # Curvature Energy Product
     curvature_energy_product = np.clip(path_curvature * specific_kinetic_energy, 0.0, 500000.0)
 
-    # 4. Target Class: Sim Baseline (Vertical Kinetic Power)
+    # Vertical Kinetic Power
     vertical_kinetic_power = np.clip(vertical_speed * specific_kinetic_energy, -250000.0, 250000.0)
 
-    # ── PE DISTRIBUTION FEATURES (TASK 5 QUICK WINS) ────────────────────
-    pe_window_mean = pd.Series(prediction_error).rolling(window_len, min_periods=1).mean().fillna(0.0).values
-    pe_window_var = pd.Series(prediction_error).rolling(window_len, min_periods=1).var(ddof=0).fillna(0.0).values
-    pe_window_skew = pd.Series(prediction_error).rolling(window_len, min_periods=1).skew().fillna(0.0).values
+    # ── CROSS-CORRELATION FEATURES ──────────────────────────────────────
+    # 1. Correlation between ground_speed and turn_rate (aircraft dynamics: speed drops in sharp turns)
+    corr_speed_turn = (
+        pd.Series(ground_speed)
+        .rolling(window=window_len, min_periods=3)
+        .corr(pd.Series(turn_rate))
+        .fillna(0.0)
+        .clip(-1.0, 1.0)
+        .values
+    )
+    # 2. Correlation between acceleration and turn_rate
+    corr_accel_turn = (
+        pd.Series(acceleration)
+        .rolling(window=window_len, min_periods=3)
+        .corr(pd.Series(turn_rate))
+        .fillna(0.0)
+        .clip(-1.0, 1.0)
+        .values
+    )
+    # 3. Correlation between vertical_speed and ground_speed
+    corr_vert_speed = (
+        pd.Series(vertical_speed)
+        .rolling(window=window_len, min_periods=3)
+        .corr(pd.Series(ground_speed))
+        .fillna(0.0)
+        .clip(-1.0, 1.0)
+        .values
+    )
 
     # Construct final dataframe
     df_out = pd.DataFrame()
@@ -341,9 +403,9 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
     df_out['prediction_error_autocorrelation'] = prediction_error_autocorrelation
     df_out['position_residual_std'] = position_residual_std
     df_out['speed_spectral_entropy'] = speed_spectral_entropy
-    df_out['pe_window_mean'] = pe_window_mean
-    df_out['pe_window_var'] = pe_window_var
-    df_out['pe_window_skew'] = pe_window_skew
+    df_out['corr_speed_turn'] = corr_speed_turn
+    df_out['corr_accel_turn'] = corr_accel_turn
+    df_out['corr_vert_speed'] = corr_vert_speed
     df_out['specific_kinetic_energy'] = specific_kinetic_energy
     df_out['yaw_acceleration'] = yaw_acceleration
     df_out['kinematic_velocity_mismatch'] = kinematic_velocity_mismatch

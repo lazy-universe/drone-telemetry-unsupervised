@@ -1,21 +1,22 @@
 """
-Task 5: Quick Wins Module (Physics Rules & Prediction Error Distribution Features)
-Provides hard physics-based anomaly detection rules and prediction error (PE) distribution feature extraction.
-These can be used as a deterministic ensemble layer or feature expansion on top of unsupervised ML/DL models.
+Physics-Informed Anomaly Detection Module
+Provides deterministic aerodynamic / kinematic rule-based flags and prediction error (PE) distribution statistics.
+These serve as a deterministic guardrail / ensemble layer on top of unsupervised statistical & deep learning models.
 """
 
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 import numpy as np
 import pandas as pd
 
-# Feature definitions for Task 5
+# Prediction error distribution features
 PE_DISTRIBUTION_FEATURES: List[str] = [
     'pe_window_mean',
     'pe_window_var',
     'pe_window_skew'
 ]
 
-TASK5_EXTENDED_FEATURES: List[str] = [
+# Extended feature set incorporating physics & noise features
+PHYSICS_EXTENDED_FEATURES: List[str] = [
     'height', 'ground_speed', 'vertical_speed', 'acceleration', 'turn_rate',
     'path_curvature', 'heading_speed_consistency', 'motion_smoothness',
     'prediction_error', 'yaw_acceleration',
@@ -95,13 +96,9 @@ def extract_pe_distribution_features(
     pe_series = pd.Series(prediction_error_series)
     return {
         'pe_window_mean': pe_series.rolling(window=window_length, min_periods=1).mean().fillna(0.0).values,
-        'pe_window_var': pe_series.rolling(window=window_length, min_periods=1).var(ddof=0).fillna(0.0).values,
-        'pe_window_skew': pe_series.rolling(window=window_length, min_periods=1).skew().fillna(0.0).values,
+        'pe_window_var': pe_series.rolling(window=window_length, min_periods=2).var(ddof=0).fillna(0.0).values,
+        'pe_window_skew': pe_series.rolling(window=window_length, min_periods=3).skew().fillna(0.0).values,
     }
-
-
-# Backward-compatible alias
-compute_pe_distribution_features = extract_pe_distribution_features
 
 
 def combine_anomaly_mask_with_physics_rules(
@@ -120,10 +117,6 @@ def combine_anomaly_mask_with_physics_rules(
     """
     physics_flags = compute_physics_rule_flags(telemetry_df)
     return model_anomaly_mask | physics_flags
-
-
-# Backward-compatible alias
-combine_model_with_physics = combine_anomaly_mask_with_physics_rules
 
 
 def evaluate_physics_augmented_models(
@@ -184,7 +177,3 @@ def evaluate_physics_augmented_models(
         evaluation_records.append(aug_record)
 
     return pd.DataFrame(evaluation_records)
-
-
-# Backward-compatible alias
-evaluate_predictions_with_physics = evaluate_physics_augmented_models

@@ -116,7 +116,7 @@ plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.
 plt.rcParams.update({'font.sans-serif': 'DejaVu Sans', 'font.family': 'sans-serif', 'figure.autolayout': True})
 
 fig, ax = plt.subplots(figsize=(14, 7))
-plot_classes = [c for c in ['Normal DJI', 'Real ESP32', 'Sim Easy', 'Sim Medium', 'Sim Geometry', 'Sim Baseline'] if c in all_classes]
+plot_classes = [c for c in ['Normal DJI', 'Real ESP32', 'Sim Easy', 'Sim Medium', 'Sim Hard', 'Sim Baseline'] if c in all_classes]
 x = np.arange(len(plot_classes))
 
 selected_ens = [

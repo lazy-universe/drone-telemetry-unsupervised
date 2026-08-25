@@ -2,6 +2,10 @@ from .features import (
     WINDOW_LEN,
     INTERSECTING_FEATURES,
     UNSUPERVISED_FEATURES,
+    KINEMATIC_8_FEATURES,
+    NOISE_TEXTURE_13_FEATURES,
+    BASELINE_CORRELATION_13_FEATURES,
+    CROSS_CORRELATION_16_FEATURES,
     engineer_features_for_df,
     compute_geographic_bearing,
     compute_relative_height,
@@ -35,11 +39,13 @@ from .logging_helper import (
     log_pointwise_dataset_statistics,
     log_sequence_dataset_statistics
 )
-from .task5_quick_wins import (
+from .physics_rules import (
+    compute_physics_rule_flags,
     physics_rule_flags,
-    compute_pe_distribution_features,
-    combine_model_with_physics,
-    evaluate_predictions_with_physics,
+    extract_pe_distribution_features,
+    combine_anomaly_mask_with_physics_rules,
+    evaluate_physics_augmented_models,
     PE_DISTRIBUTION_FEATURES,
-    TASK5_EXTENDED_FEATURES
+    PHYSICS_EXTENDED_FEATURES
 )
+
