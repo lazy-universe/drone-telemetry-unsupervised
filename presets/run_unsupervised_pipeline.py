@@ -131,7 +131,8 @@ def run_experiment(
     fresh_cache: bool = True,
     use_cache: bool = True,
     enable_physics_rules: bool = False,
-    exclude_sim_geometry: bool = True
+    exclude_sim_geometry: bool = True,
+    split_mode: str = "flight"
 ) -> pd.DataFrame:
     """
     Executes the anomaly detection pipeline for a specified feature set and model family.
@@ -143,18 +144,36 @@ def run_experiment(
     print()
     print("=" * 80)
     print(f"=== UNSUPERVISED PIPELINE: {exp_name.upper()} ({len(feature_list)} Features) ===")
-    print(f"=== Device: {device} | Max Epochs: {epochs} | Patience: {patience} | Window: {window_len} | Physics Rules: {enable_physics_rules} | Exclude Sim Geometry: {exclude_sim_geometry} ===")
+    print(f"=== Device: {device} | Max Epochs: {epochs} | Patience: {patience} | Window: {window_len} | Split Mode: {split_mode} | Physics Rules: {enable_physics_rules} | Exclude Sim Geometry: {exclude_sim_geometry} ===")
     print("=" * 80)
 
     dji_df, esp32_df = get_labeled_datasets(features=feature_list)
 
-    unique_flights = dji_df["flight_id"].unique()
-    train_fl, temp = train_test_split(unique_flights, test_size=0.3, random_state=42)
-    val_fl, test_fl = train_test_split(temp, test_size=0.5, random_state=42)
+    if split_mode == "device" and "flight_id" in dji_df.columns:
+        def extract_device_model(fid):
+            fname = str(fid).lower().replace('.csv', '')
+            parts = fname.split('_dji_')
+            if len(parts) > 1:
+                return 'dji_' + parts[1]
+            return fname
 
-    dji_train = dji_df[dji_df["flight_id"].isin(train_fl)]
-    dji_val   = dji_df[dji_df["flight_id"].isin(val_fl)]
-    dji_test  = dji_df[dji_df["flight_id"].isin(test_fl)]
+        dji_df['device_model'] = dji_df['flight_id'].apply(extract_device_model)
+        unique_devices = np.sort(dji_df['device_model'].unique())
+        train_dev, temp_dev = train_test_split(unique_devices, test_size=0.3, random_state=42)
+        val_dev, test_dev = train_test_split(temp_dev, test_size=0.5, random_state=42)
+
+        dji_train = dji_df[dji_df["device_model"].isin(train_dev)]
+        dji_val   = dji_df[dji_df["device_model"].isin(val_dev)]
+        dji_test  = dji_df[dji_df["device_model"].isin(test_dev)]
+        print(f"Device-level split: {len(train_dev)} Train Models ({list(train_dev)}), {len(val_dev)} Val Models ({list(val_dev)}), {len(test_dev)} Test Models ({list(test_dev)})")
+    else:
+        unique_flights = dji_df["flight_id"].unique()
+        train_fl, temp = train_test_split(unique_flights, test_size=0.3, random_state=42)
+        val_fl, test_fl = train_test_split(temp, test_size=0.5, random_state=42)
+
+        dji_train = dji_df[dji_df["flight_id"].isin(train_fl)]
+        dji_val   = dji_df[dji_df["flight_id"].isin(val_fl)]
+        dji_test  = dji_df[dji_df["flight_id"].isin(test_fl)]
 
     test_df = pd.concat([dji_test, esp32_df], ignore_index=True)
     all_classes = sorted(list(test_df["attack_class"].unique()))
@@ -457,6 +476,7 @@ def main():
     parser.add_argument("--no-model-cache", action="store_true", help="Do not load cached models; force retrain")
     parser.add_argument("--enable-physics-rules", action="store_true", default=False, help="Enable deterministic physics-based rules")
     parser.add_argument("--include-sim-geometry", action="store_true", default=False, help="Include Sim Geometry in aggregate accuracy metrics (default is to exclude for transparency)")
+    parser.add_argument("--split-mode", choices=["flight", "device", "random"], default="flight", help="Data split strategy for DJI normal flights (default: flight)")
 
     args = parser.parse_args()
 
@@ -486,7 +506,8 @@ def main():
         fresh_cache=not args.no_fresh_cache,
         use_cache=not args.no_model_cache,
         enable_physics_rules=args.enable_physics_rules,
-        exclude_sim_geometry=not args.include_sim_geometry
+        exclude_sim_geometry=not args.include_sim_geometry,
+        split_mode=args.split_mode
     )
 
 
