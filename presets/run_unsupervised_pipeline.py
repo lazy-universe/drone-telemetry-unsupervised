@@ -31,53 +31,49 @@ from implement.utils.helper.physics_rules import compute_physics_rule_flags
 
 # Standard Predefined Feature Sets
 FEATURE_SETS = {
-    "raw_coords": ["latitude", "longitude", "course", "ground_speed", "vertical_speed", "height"],
-    "raw_no_coords": ["course", "ground_speed", "vertical_speed", "height"],
-    "raw_engineered": ["course", "ground_speed", "vertical_speed", "height", "acceleration", "vertical_acceleration", "turn_rate", "path_curvature"],
-    "baseline_8": [
-        "height", "ground_speed", "vertical_speed", "acceleration", "turn_rate",
-        "path_curvature", "heading_speed_consistency", "motion_smoothness"
+    "raw_coords": [
+        "latitude", "longitude", "course", "ground_speed", "vertical_speed", "height"
     ],
-    "kinematic_8": [
-        "height", "ground_speed", "vertical_speed", "acceleration", "turn_rate",
-        "path_curvature", "heading_speed_consistency", "motion_smoothness"
+    "raw_no_coords": [
+        "course", "ground_speed", "vertical_speed", "height"
     ],
-    "baseline_10": [
-        "height", "ground_speed", "vertical_speed", "acceleration", "turn_rate",
-        "path_curvature", "heading_speed_consistency", "motion_smoothness",
-        "prediction_error", "yaw_acceleration"
+    "raw_engineered": [
+        "course", "ground_speed", "vertical_speed", "height",
+        "acceleration", "vertical_acceleration", "turn_rate", "path_curvature"
     ],
-    "noise_texture_13": [
-        "height", "ground_speed", "vertical_speed", "acceleration", "turn_rate",
-        "path_curvature", "heading_speed_consistency", "motion_smoothness",
-        "prediction_error", "yaw_acceleration",
-        "prediction_error_autocorrelation", "position_residual_std", "speed_spectral_entropy"
+    "baseline_7": [
+        "motion_smoothness", "heading_speed_consistency", "ground_speed", 
+        "height", "vertical_speed", "acceleration", "turn_rate"
     ],
-    "baseline_corr_13": [
-        "height", "ground_speed", "vertical_speed", "acceleration", "turn_rate",
-        "path_curvature", "heading_speed_consistency", "motion_smoothness",
-        "prediction_error", "yaw_acceleration",
-        "corr_speed_turn", "corr_accel_turn", "corr_vert_speed"
+    "baseline_7_plus_pos": [
+        "motion_smoothness", "heading_speed_consistency", "ground_speed", 
+        "height", "vertical_speed", "acceleration", "turn_rate",
+        "position_residual_std"
     ],
-    "correlation_13": [
-        "height", "ground_speed", "vertical_speed", "acceleration", "turn_rate",
-        "path_curvature", "heading_speed_consistency", "motion_smoothness",
-        "prediction_error", "yaw_acceleration",
-        "corr_speed_turn", "corr_accel_turn", "corr_vert_speed"
+    "baseline_7_plus_pe": [
+        "motion_smoothness", "heading_speed_consistency", "ground_speed", 
+        "height", "vertical_speed", "acceleration", "turn_rate",
+        "prediction_error"
     ],
-    "correlation_16": [
-        "height", "ground_speed", "vertical_speed", "acceleration", "turn_rate",
-        "path_curvature", "heading_speed_consistency", "motion_smoothness",
-        "prediction_error", "yaw_acceleration",
-        "prediction_error_autocorrelation", "position_residual_std", "speed_spectral_entropy",
-        "corr_speed_turn", "corr_accel_turn", "corr_vert_speed"
+    "baseline_7_plus_pe_entropy": [
+        "motion_smoothness", "heading_speed_consistency", "ground_speed", 
+        "height", "vertical_speed", "acceleration", "turn_rate",
+        "prediction_error", "speed_spectral_entropy"
     ],
-    "cross_corr_16": [
-        "height", "ground_speed", "vertical_speed", "acceleration", "turn_rate",
-        "path_curvature", "heading_speed_consistency", "motion_smoothness",
-        "prediction_error", "yaw_acceleration",
-        "prediction_error_autocorrelation", "position_residual_std", "speed_spectral_entropy",
-        "corr_speed_turn", "corr_accel_turn", "corr_vert_speed"
+    "baseline_7_plus_pe_pos": [
+        "motion_smoothness", "heading_speed_consistency", "ground_speed", 
+        "height", "vertical_speed", "acceleration", "turn_rate",
+        "prediction_error", "position_residual_std"
+    ],
+    "baseline_7_plus_pe_pos_entropy": [
+        "motion_smoothness", "heading_speed_consistency", "ground_speed", 
+        "height", "vertical_speed", "acceleration", "turn_rate",
+        "prediction_error", "position_residual_std", "speed_spectral_entropy"
+    ],
+    "baseline_7_plus_pe_pos_yaw": [
+        "motion_smoothness", "heading_speed_consistency", "ground_speed", 
+        "height", "vertical_speed", "acceleration", "turn_rate",
+        "prediction_error", "position_residual_std", "yaw_acceleration"
     ],
 }
 
@@ -134,7 +130,8 @@ def run_experiment(
     patience: int = 7,
     fresh_cache: bool = True,
     use_cache: bool = True,
-    enable_physics_rules: bool = False
+    enable_physics_rules: bool = False,
+    exclude_sim_geometry: bool = True
 ) -> pd.DataFrame:
     """
     Executes the anomaly detection pipeline for a specified feature set and model family.
@@ -146,7 +143,7 @@ def run_experiment(
     print()
     print("=" * 80)
     print(f"=== UNSUPERVISED PIPELINE: {exp_name.upper()} ({len(feature_list)} Features) ===")
-    print(f"=== Device: {device} | Max Epochs: {epochs} | Patience: {patience} | Window: {window_len} | Physics Rules: {enable_physics_rules} ===")
+    print(f"=== Device: {device} | Max Epochs: {epochs} | Patience: {patience} | Window: {window_len} | Physics Rules: {enable_physics_rules} | Exclude Sim Geometry: {exclude_sim_geometry} ===")
     print("=" * 80)
 
     dji_df, esp32_df = get_labeled_datasets(features=feature_list)
@@ -178,7 +175,7 @@ def run_experiment(
     # Standalone Physics Rules (if enabled)
     if enable_physics_rules:
         rule_flags_all = compute_physics_rule_flags(test_df)
-        eval_mask = (test_df["attack_class"] != "Sim Geometry")
+        eval_mask = (test_df["attack_class"] != "Sim Geometry") if exclude_sim_geometry else np.ones(len(test_df), dtype=bool)
         normal_mask = (test_df["attack_class"] == "Normal DJI") & eval_mask
         spoofed_mask = (test_df["attack_class"] != "Normal DJI") & eval_mask
 
@@ -226,7 +223,7 @@ def run_experiment(
             if enable_physics_rules:
                 anom_pred = anom_pred | compute_physics_rule_flags(test_df)
 
-            eval_mask = (test_df["attack_class"] != "Sim Geometry")
+            eval_mask = (test_df["attack_class"] != "Sim Geometry") if exclude_sim_geometry else np.ones(len(test_df), dtype=bool)
             normal_mask = (test_df["attack_class"] == "Normal DJI") & eval_mask
             spoofed_mask = (test_df["attack_class"] != "Normal DJI") & eval_mask
 
@@ -371,7 +368,7 @@ def run_experiment(
                             dl_anom_all = dl_anom_all | ph_flags[window_len - 1:]
 
                     test_classes_windowed = test_df["attack_class"].values[window_len - 1:]
-                    eval_mask_dl = (test_classes_windowed != "Sim Geometry")
+                    eval_mask_dl = (test_classes_windowed != "Sim Geometry") if exclude_sim_geometry else np.ones(len(test_classes_windowed), dtype=bool)
                     normal_mask_dl = (test_classes_windowed == "Normal DJI") & eval_mask_dl
                     spoofed_mask_dl = (test_classes_windowed != "Normal DJI") & eval_mask_dl
 
@@ -421,11 +418,18 @@ def run_experiment(
     df_aggregate.to_csv(agg_path, index=False)
     df_per_class.to_csv(per_class_path, index=False)
 
+    sim_geo_note = (
+        "Note: 'Sim Geometry' is EXCLUDED from aggregate metrics (Overall, Normal, Spoofed Accuracy) for transparency, but retained in the per-class breakdown."
+        if exclude_sim_geometry else
+        "Note: 'Sim Geometry' is INCLUDED in aggregate metrics (Overall, Normal, Spoofed Accuracy)."
+    )
+
     print()
     print("=" * 80)
     print(f"📊 AGGREGATE PERFORMANCE SUMMARY: {exp_name.upper()}")
     print("=" * 80)
     print(df_aggregate.to_string(index=False))
+    print(f"\nℹ️  {sim_geo_note}")
 
     print()
     print("=" * 80)
@@ -452,6 +456,7 @@ def main():
     parser.add_argument("--no-fresh-cache", action="store_true", help="Do not clear ephemeral dataset cache")
     parser.add_argument("--no-model-cache", action="store_true", help="Do not load cached models; force retrain")
     parser.add_argument("--enable-physics-rules", action="store_true", default=False, help="Enable deterministic physics-based rules")
+    parser.add_argument("--include-sim-geometry", action="store_true", default=False, help="Include Sim Geometry in aggregate accuracy metrics (default is to exclude for transparency)")
 
     args = parser.parse_args()
 
@@ -480,7 +485,8 @@ def main():
         window_len=args.window_len,
         fresh_cache=not args.no_fresh_cache,
         use_cache=not args.no_model_cache,
-        enable_physics_rules=args.enable_physics_rules
+        enable_physics_rules=args.enable_physics_rules,
+        exclude_sim_geometry=not args.include_sim_geometry
     )
 
 

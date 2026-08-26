@@ -19,7 +19,38 @@ INTERSECTING_FEATURES = [
 
 UNSUPERVISED_FEATURES = INTERSECTING_FEATURES.copy()
 
-KINEMATIC_8_FEATURES = [
+RAW_COORDS_FEATURES = [
+    'latitude', 'longitude', 'course', 'ground_speed', 'vertical_speed', 'height'
+]
+
+RAW_NO_COORDS_FEATURES = [
+    'course', 'ground_speed', 'vertical_speed', 'height'
+]
+
+RAW_ENGINEERED_FEATURES = [
+    'course', 'ground_speed', 'vertical_speed', 'height',
+    'acceleration', 'vertical_acceleration', 'turn_rate', 'path_curvature'
+]
+
+BASELINE_7_FEATURES = [
+    'motion_smoothness',
+    'heading_speed_consistency',
+    'ground_speed',
+    'height',
+    'vertical_speed',
+    'acceleration',
+    'turn_rate',
+]
+
+BASELINE_7_PLUS_POS_FEATURES = BASELINE_7_FEATURES + ['position_residual_std']
+BASELINE_7_PLUS_PE_FEATURES = BASELINE_7_FEATURES + ['prediction_error']
+BASELINE_7_PLUS_PE_ENTROPY_FEATURES = BASELINE_7_FEATURES + ['prediction_error', 'speed_spectral_entropy']
+BASELINE_7_PLUS_PE_POS_FEATURES = BASELINE_7_FEATURES + ['prediction_error', 'position_residual_std']
+BASELINE_7_PLUS_PE_POS_ENTROPY_FEATURES = BASELINE_7_PLUS_PE_POS_FEATURES + ['speed_spectral_entropy']
+BASELINE_7_PLUS_PE_POS_YAW_FEATURES = BASELINE_7_PLUS_PE_POS_FEATURES + ['yaw_acceleration']
+
+ALL_INCLUSIVE_20_FEATURES = [
+    'course',
     'height',
     'ground_speed',
     'vertical_speed',
@@ -28,21 +59,14 @@ KINEMATIC_8_FEATURES = [
     'path_curvature',
     'heading_speed_consistency',
     'motion_smoothness',
-]
-
-NOISE_TEXTURE_13_FEATURES = INTERSECTING_FEATURES + [
+    'prediction_error',
+    'yaw_acceleration',
     'prediction_error_autocorrelation',
     'position_residual_std',
     'speed_spectral_entropy',
-]
-
-BASELINE_CORRELATION_13_FEATURES = INTERSECTING_FEATURES + [
-    'corr_speed_turn',
-    'corr_accel_turn',
-    'corr_vert_speed',
-]
-
-CROSS_CORRELATION_16_FEATURES = NOISE_TEXTURE_13_FEATURES + [
+    'pe_window_mean',
+    'pe_window_var',
+    'pe_window_skew',
     'corr_speed_turn',
     'corr_accel_turn',
     'corr_vert_speed',
@@ -378,6 +402,11 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
         .values
     )
 
+    # 4. Prediction Error Distribution Features (Windowed Macro-Trends)
+    pe_window_mean = pd.Series(prediction_error).rolling(window=window_len, min_periods=1).mean().fillna(0.0).values
+    pe_window_var = pd.Series(prediction_error).rolling(window=window_len, min_periods=2).var(ddof=0).fillna(0.0).values
+    pe_window_skew = pd.Series(prediction_error).rolling(window=window_len, min_periods=3).skew().fillna(0.0).values
+
     # Construct final dataframe
     df_out = pd.DataFrame()
     df_out['timestamp'] = time
@@ -403,6 +432,9 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
     df_out['prediction_error_autocorrelation'] = prediction_error_autocorrelation
     df_out['position_residual_std'] = position_residual_std
     df_out['speed_spectral_entropy'] = speed_spectral_entropy
+    df_out['pe_window_mean'] = pe_window_mean
+    df_out['pe_window_var'] = pe_window_var
+    df_out['pe_window_skew'] = pe_window_skew
     df_out['corr_speed_turn'] = corr_speed_turn
     df_out['corr_accel_turn'] = corr_accel_turn
     df_out['corr_vert_speed'] = corr_vert_speed
