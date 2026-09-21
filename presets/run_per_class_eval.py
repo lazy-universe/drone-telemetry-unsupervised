@@ -55,7 +55,22 @@ def main():
         default=3.0,
         help="Threshold multiplier k (threshold = mean + k*std) (default: 3.0)"
     )
+    parser.add_argument(
+        "--features",
+        nargs='+',
+        default=None,
+        help="Explicit list of features to use for evaluation (space-separated or comma-separated)"
+    )
     args = parser.parse_args()
+
+    features_list = None
+    if args.features:
+        features_list = []
+        for item in args.features:
+            for feat in item.split(','):
+                feat_clean = feat.strip()
+                if feat_clean and feat_clean not in features_list:
+                    features_list.append(feat_clean)
 
     run_per_class_evaluation(
         model_family=args.model_family,
@@ -64,7 +79,8 @@ def main():
         batch_size=args.batch_size,
         lr=args.lr,
         window_len=args.window_len,
-        k_threshold=args.k_threshold
+        k_threshold=args.k_threshold,
+        features=features_list
     )
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 """
-Informed Ablation Study — tests 8 feature subsets on GMM + Isolation Forest.
-ZERO data leakage (Sim Normal is TEST ONLY). Output is Accuracy (%).
+Informed Ablation Study — tests feature subsets on GMM + Isolation Forest.
 """
 import sys, warnings
 sys.path.insert(0, '.')
@@ -17,7 +16,6 @@ from sklearn.ensemble import IsolationForest
 from implement.utils.helper import (
     get_or_preprocess_dji_dataset,
     get_or_preprocess_esp32_dataset,
-    
     UNSUPERVISED_FEATURES,
 )
 from implement.utils.classical_ml.classical_models import GMMWrapper
@@ -28,7 +26,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ATTACK_MAP = {
     'esp32': 'Real ESP32', 'baseline': 'Sim Baseline', 'easy': 'Sim Easy',
-    'medium': 'Sim Medium', 'hard': 'Sim Hard', 'geometry': 'Sim Geometry',
+    'medium': 'Sim Medium', 'hard': 'Sim Hard',
 }
 
 SUBSETS = {
@@ -85,7 +83,7 @@ for subset_name, feats in SUBSETS.items():
         for cls in all_classes:
             mask   = test_df['attack_class'] == cls
             is_anomaly = get_anomaly_scores(m, X_te[mask]) > thresh
-            if cls in ['Normal DJI', 'Sim Normal']:
+            if cls == 'Normal DJI':
                 acc = np.mean(~is_anomaly) * 100.0
             else:
                 acc = np.mean(is_anomaly) * 100.0

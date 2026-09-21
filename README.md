@@ -83,7 +83,7 @@ python presets/run_device_split_benchmark.py
 ```
 
 ### 3. Per-Class Sub-Attack Breakdown (`run_per_class_eval.py`)
-Evaluates anomaly detection sensitivity against individual spoofing attack categories (Real ESP32, Sim Easy, Sim Medium, Sim Geometry, Sim Baseline):
+Evaluates anomaly detection sensitivity against individual spoofing attack categories (Real ESP32, Sim Easy, Sim Medium, Sim Hard, Sim Baseline):
 ```bash
 python presets/run_per_class_eval.py
 ```

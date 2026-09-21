@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from scipy.signal import savgol_filter
 
 WINDOW_LEN = 20  # Window length for sequence slicing (20 samples @ 2Hz = 10.0 seconds of log history)
 
@@ -17,6 +18,59 @@ INTERSECTING_FEATURES = [
 ]
 
 UNSUPERVISED_FEATURES = INTERSECTING_FEATURES.copy()
+
+RAW_COORDS_FEATURES = [
+    'latitude', 'longitude', 'course', 'ground_speed', 'vertical_speed', 'height'
+]
+
+RAW_NO_COORDS_FEATURES = [
+    'course', 'ground_speed', 'vertical_speed', 'height'
+]
+
+RAW_ENGINEERED_FEATURES = [
+    'course', 'ground_speed', 'vertical_speed', 'height',
+    'acceleration', 'vertical_acceleration', 'turn_rate', 'path_curvature'
+]
+
+BASELINE_7_FEATURES = [
+    'motion_smoothness',
+    'heading_speed_consistency',
+    'ground_speed',
+    'height',
+    'vertical_speed',
+    'acceleration',
+    'turn_rate',
+]
+
+BASELINE_7_PLUS_POS_FEATURES = BASELINE_7_FEATURES + ['position_residual_std']
+BASELINE_7_PLUS_PE_FEATURES = BASELINE_7_FEATURES + ['prediction_error']
+BASELINE_7_PLUS_PE_ENTROPY_FEATURES = BASELINE_7_FEATURES + ['prediction_error', 'speed_spectral_entropy']
+BASELINE_7_PLUS_PE_POS_FEATURES = BASELINE_7_FEATURES + ['prediction_error', 'position_residual_std']
+BASELINE_7_PLUS_PE_POS_ENTROPY_FEATURES = BASELINE_7_PLUS_PE_POS_FEATURES + ['speed_spectral_entropy']
+BASELINE_7_PLUS_PE_POS_YAW_FEATURES = BASELINE_7_PLUS_PE_POS_FEATURES + ['yaw_acceleration']
+
+ALL_INCLUSIVE_20_FEATURES = [
+    'course',
+    'height',
+    'ground_speed',
+    'vertical_speed',
+    'acceleration',
+    'turn_rate',
+    'path_curvature',
+    'heading_speed_consistency',
+    'motion_smoothness',
+    'prediction_error',
+    'yaw_acceleration',
+    'prediction_error_autocorrelation',
+    'position_residual_std',
+    'speed_spectral_entropy',
+    'pe_window_mean',
+    'pe_window_var',
+    'pe_window_skew',
+    'corr_speed_turn',
+    'corr_accel_turn',
+    'corr_vert_speed',
+]
 
 
 def compute_geographic_bearing(lat1, lon1, lat2, lon2):
@@ -180,10 +234,10 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
     window_len = int(round(3.0 / step_size))
     
     # 8. Speed Variance
-    speed_variance = df_temp['ground_speed'].rolling(window=window_len, min_periods=1).var(ddof=0).values
+    speed_variance = df_temp['ground_speed'].rolling(window=window_len, min_periods=2).var(ddof=0).fillna(0.0).values
     
     # 9. Vertical Speed Variance
-    vertical_speed_variance = df_temp['vertical_speed'].rolling(window=window_len, min_periods=1).var(ddof=0).values
+    vertical_speed_variance = df_temp['vertical_speed'].rolling(window=window_len, min_periods=2).var(ddof=0).fillna(0.0).values
     
     # 10. Heading Variance
     theta_rad = np.radians((90.0 - heading) % 360)
@@ -232,22 +286,126 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
     # 14. Motion Smoothness [0, 50] m/s^3
     motion_smoothness = np.clip(df_temp['jerk'].abs().rolling(window=window_len, min_periods=1).mean().values, 0.0, 50.0)
     
+    # ── NOISE TEXTURE FEATURES ──────────────────────────────────────────
+
+    # Prediction Error Autocorrelation [−1, 1]
+    # Real GPS multipath noise is temporally correlated (lag-1 autocorr > 0).
+    # Simulated flights have IID or zero noise (autocorr ≈ 0).
+    def _safe_autocorr(x):
+        if len(x) < 3:
+            return 0.0
+        s = pd.Series(x)
+        if s.std(ddof=0) < 1e-8:
+            return 0.0
+        val = s.autocorr(lag=1)
+        return 0.0 if (np.isnan(val) or np.isinf(val)) else float(val)
+
+    pe_series = pd.Series(prediction_error)
+    prediction_error_autocorrelation = pe_series.rolling(
+        window=window_len, min_periods=3
+    ).apply(
+        _safe_autocorr, raw=False
+    ).fillna(0.0).values
+    prediction_error_autocorrelation = np.clip(prediction_error_autocorrelation, -1.0, 1.0)
+
+    # Position Residual Std [0, 50] meters
+    # Savitzky-Golay detrended position noise standard deviation.
+    # Real flights: ~0.5-3m std from GPS jitter.
+    # Simulated flights: ~0 std (smooth traces).
+    try:
+        sg_window = min(11, len(latitude_abs) - 1)
+        if sg_window % 2 == 0:
+            sg_window -= 1
+        if sg_window >= 5:
+            lat_smooth = savgol_filter(latitude_abs, window_length=sg_window, polyorder=3)
+            lon_smooth = savgol_filter(longitude_abs, window_length=sg_window, polyorder=3)
+        else:
+            lat_smooth = latitude_abs
+            lon_smooth = longitude_abs
+    except Exception:
+        lat_smooth = latitude_abs
+        lon_smooth = longitude_abs
+    lat_res_m = (latitude_abs - lat_smooth) * 111139.0
+    lon_res_m = (longitude_abs - lon_smooth) * 111139.0 * cos_ref_lat
+    position_residual = np.sqrt(lat_res_m**2 + lon_res_m**2)
+    position_residual_std = np.clip(
+        pd.Series(position_residual).rolling(window=window_len, min_periods=2).std(ddof=0).fillna(0.0).values,
+        0.0, 50.0
+    )
+
+    # Speed Spectral Entropy [0, 10]
+    # Spectral entropy of ground speed in a rolling window.
+    # Real flights: broadband noise from vibration + GPS → high entropy.
+    # Simulated flights: smooth signals → low entropy.
+    def _spectral_entropy(x):
+        if len(x) < 4:
+            return 0.0
+        fft_vals = np.abs(np.fft.rfft(x - np.mean(x)))
+        psd = fft_vals ** 2
+        total = psd.sum()
+        if total < 1e-12:
+            return 0.0
+        psd_norm = psd / total
+        psd_norm = psd_norm[psd_norm > 0]
+        return float(-np.sum(psd_norm * np.log(psd_norm + 1e-12)))
+
+    speed_spectral_entropy = np.clip(
+        pd.Series(ground_speed).rolling(
+            window=window_len * 2, min_periods=4
+        ).apply(_spectral_entropy, raw=True).fillna(0.0).values,
+        0.0, 10.0
+    )
+
     # Specific Kinetic Energy [0, 5000] m^2/s^2
     specific_kinetic_energy = np.clip(0.5 * (ground_speed**2 + vertical_speed**2), 0.0, 5000.0)
 
-    # 1. Target Class: Sim Medium (Yaw Acceleration)
+    # Yaw Acceleration
     turn_rate_diff = np.diff(turn_rate, prepend=turn_rate[0])
     yaw_acceleration = np.clip(turn_rate_diff / time_diff, -1000.0, 1000.0)
 
-    # 2. Target Class: Sim Hard (Kinematic Velocity Mismatch)
+    # Kinematic Velocity Mismatch
     spatial_speed = np.clip(np.sqrt(dx_obs**2 + dy_obs**2) / time_diff, 0.0, 100.0)
     kinematic_velocity_mismatch = np.clip(np.abs(spatial_speed - ground_speed_abs), 0.0, 100.0)
 
-    # 3. Target Class: Sim Geometry (Curvature Energy Product)
+    # Curvature Energy Product
     curvature_energy_product = np.clip(path_curvature * specific_kinetic_energy, 0.0, 500000.0)
 
-    # 4. Target Class: Sim Baseline (Vertical Kinetic Power)
+    # Vertical Kinetic Power
     vertical_kinetic_power = np.clip(vertical_speed * specific_kinetic_energy, -250000.0, 250000.0)
+
+    # ── CROSS-CORRELATION FEATURES ──────────────────────────────────────
+    # 1. Correlation between ground_speed and turn_rate (aircraft dynamics: speed drops in sharp turns)
+    corr_speed_turn = (
+        pd.Series(ground_speed)
+        .rolling(window=window_len, min_periods=3)
+        .corr(pd.Series(turn_rate))
+        .fillna(0.0)
+        .clip(-1.0, 1.0)
+        .values
+    )
+    # 2. Correlation between acceleration and turn_rate
+    corr_accel_turn = (
+        pd.Series(acceleration)
+        .rolling(window=window_len, min_periods=3)
+        .corr(pd.Series(turn_rate))
+        .fillna(0.0)
+        .clip(-1.0, 1.0)
+        .values
+    )
+    # 3. Correlation between vertical_speed and ground_speed
+    corr_vert_speed = (
+        pd.Series(vertical_speed)
+        .rolling(window=window_len, min_periods=3)
+        .corr(pd.Series(ground_speed))
+        .fillna(0.0)
+        .clip(-1.0, 1.0)
+        .values
+    )
+
+    # 4. Prediction Error Distribution Features (Windowed Macro-Trends)
+    pe_window_mean = pd.Series(prediction_error).rolling(window=window_len, min_periods=1).mean().fillna(0.0).values
+    pe_window_var = pd.Series(prediction_error).rolling(window=window_len, min_periods=2).var(ddof=0).fillna(0.0).values
+    pe_window_skew = pd.Series(prediction_error).rolling(window=window_len, min_periods=3).skew().fillna(0.0).values
 
     # Construct final dataframe
     df_out = pd.DataFrame()
@@ -271,6 +429,15 @@ def engineer_features_for_df(df, lat_col, lon_col, alt_col, speed_col, heading_c
     df_out['prediction_error'] = prediction_error
     df_out['heading_speed_consistency'] = heading_speed_consistency
     df_out['motion_smoothness'] = motion_smoothness
+    df_out['prediction_error_autocorrelation'] = prediction_error_autocorrelation
+    df_out['position_residual_std'] = position_residual_std
+    df_out['speed_spectral_entropy'] = speed_spectral_entropy
+    df_out['pe_window_mean'] = pe_window_mean
+    df_out['pe_window_var'] = pe_window_var
+    df_out['pe_window_skew'] = pe_window_skew
+    df_out['corr_speed_turn'] = corr_speed_turn
+    df_out['corr_accel_turn'] = corr_accel_turn
+    df_out['corr_vert_speed'] = corr_vert_speed
     df_out['specific_kinetic_energy'] = specific_kinetic_energy
     df_out['yaw_acceleration'] = yaw_acceleration
     df_out['kinematic_velocity_mismatch'] = kinematic_velocity_mismatch
